@@ -1,0 +1,147 @@
+plugins {
+	id 'java'
+	id 'eclipse'
+	id 'org.hidetake.ssh' version '1.2.0'
+	id 'com.github.johnrengelman.shadow' version '1.2.3'
+	id 'org.sonarqube' version '1.2'
+	id 'jacoco'
+}
+
+version = 1.0
+targetCompatibility = 1.8
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ["src/main"]
+        }
+    }
+    test {
+        java {
+            srcDirs = ["src/test"]
+        }
+    }
+}
+
+repositories {
+	// Local libs to load
+	flatDir {
+           dirs 'libs'
+    }
+    // General repositories
+	jcenter()
+}
+
+dependencies {
+	// JUnit
+	testCompile 'junit:junit:4.12'
+	
+	// pi4j
+    compile name: 'pi4j-core-1.0.1-SNAPSHOT'
+    
+    // websockets
+    compile name: 'tyrus-server-1.12'
+    compile name: 'tyrus-container-grizzly-server-1.12'
+    compile name: 'tyrus-standalone-client-1.12'
+    
+    // http requests
+    compile name: 'gson-2.6.2'
+    compile name: 'httpcore-4.4.4'
+    compile name: 'httpclient-4.5.2'
+    compile name: 'commons-logging-1.2'
+    
+    // pid
+    compile name: 'pid-0.0.1-SNAPSHOT'
+    
+    // OpenCV
+    compile name: 'opencv-2413'
+}
+
+/****************************************
+* Remote deployement on the raspberry pi
+****************************************/
+ssh.settings {
+	// Avoid checking known_hosts file
+  	knownHosts = allowAnyHosts
+}
+
+/**
+ * Remote raspberry pi configuration
+ */
+remotes {
+  raspberry {
+  	// Set these vars in ~/.gradle/gradle.properties
+  	host = piHostname
+  	user = piUsername
+  	if (useKey == 'true') {
+  		identity = file("${System.getProperty('user.home')}" + keyPath)
+  		agent = true
+  	} else {
+  		password = piPassword
+  	}
+    retryCount = 2
+  }
+}
+
+/**
+ * Jar deployement tasks on the remote raspberry pi.
+ * All the dependencies are self contained in the jar
+ */
+task deployToPi (dependsOn: shadowJar) << {
+	ssh.run {
+	    session(remotes.raspberry) {
+	      put from: "$projectDir/build/libs/raspoid-1.0-all.jar", into: 'raspoid-1.0-all.jar'
+	    }
+	}
+}
+configure(deployToPi) {
+	group = 'Raspoid'
+	description = 'Build and update the jar on the raspberry pi'
+}
+
+/**
+ * Deploy and launch the jar in debug mode.
+ * You need to provide the argument PentryPoint='my.fully.qualified.MainClass'
+ * to specify the entry point. The JVM socket is listening on the port 8000
+ */
+task debugOnPi (dependsOn: deployToPi) << {
+	if(project.hasProperty('entryPoint')) {
+		ssh.run {
+		    session(remotes.raspberry) {
+		      execute 'sudo java -Xdebug -Xrunjdwp:transport=dt_socket,address=8000,server=y,suspend=y -cp raspoid-1.0-all.jar ' + project.property('entryPoint')
+		    }
+		}
+	} else {
+		println "A fully qualified class name implementing the main entry point is required"
+	}
+}
+configure(debugOnPi) {
+	group = 'Raspoid'
+	description = 'Launch raspoid in debug mode on the raspberry pi'
+}
+
+sonarqube {
+    properties {
+        property "sonar.projectName", "raspoid"
+        property "sonar.projectKey", "raspoid:raspoid"
+    }
+}
+
+jacoco {
+    toolVersion = "0.7.1.201405082137"
+    reportsDir = file("$projectDir/jacocoReport")
+}
+
+jacocoTestReport {
+    reports {
+        xml.enabled = true
+        csv.enabled = true
+        html.destination = "$projectDir/jacocoHtml"
+    }
+}
+
+test {
+    jacoco {
+        destinationFile = file("$buildDir/jacoco/jacocoTest.exec")
+    }
+}

@@ -1,0 +1,13 @@
+*.class
+.gradle
+.settings
+build
+bin
+.classpath
+.project
+gradle.properties
+javadoc
+.idea
+jacocoHtml
+jacocoReport
+raspoid.iml
