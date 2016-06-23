@@ -51,8 +51,6 @@ public class MotorUtilExample {
         MA.setPidParams(1.5, 1, 1);
         MA.rotate(3, 100);
         Tools.log(MA.getEncoderValue());
-        MA.resetEncoderValue();
-        Tools.log(MA.getEncoderValue());
         MA.rotate(6, -255);
         Tools.log(MA.getEncoderValue());
         MA.move(9.4247, 150);

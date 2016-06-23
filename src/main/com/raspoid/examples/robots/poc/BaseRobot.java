@@ -16,41 +16,39 @@
  * You should have received a copy of the GNU Lesser General Public License
  * along with Raspoid.  If not, see <http://www.gnu.org/licenses/>.
  ******************************************************************************/
-package com.raspoid.examples.brickpi;
+package com.raspoid.examples.robots.poc;
 
-import com.raspoid.Tools;
 import com.raspoid.brickpi.BrickPi;
 import com.raspoid.brickpi.Motor;
 
 /**
- * Example of use of an NXT motor.
+ * Basic configuration used to easily develop other behaviours for the Proof of Concept robot
+ * presented in the Raspoid.com website.
  * 
  * @author Julien Louette &amp; Ga&euml;l Wittorski
  * @version 1.0
  */
-public class MotorsExample {
+public class BaseRobot {
+    
+    boolean stop = false;
+    
+    Motor motorLeft;
+    Motor motorRight;
     
     /**
-     * Private constructor to hide the implicit public one.
+     * Constructor for a BaseRobot.
      */
-    private MotorsExample() {
-    }
-
-    /**
-     * Command-line interface.
-     * @param args unused here.
-     */
-    public static void main(String[] args) {
-        Tools.log("---- Motors Example ----");
+    public BaseRobot() {
         BrickPi.MA = new Motor();
-        int range = 500;
-        BrickPi.MA.onChange(range, evt -> Tools.log("Encoder value updated (with a delta >= " + range + "): " + evt.getNewValue()));
-        BrickPi.MA.onRotate( evt -> Tools.log("Rotate"));
-        BrickPi.start();
-        Tools.log("Encoders " + BrickPi.MA.getEncoderValue());
-        BrickPi.MA.setPower(100);
-        Tools.sleepMilliseconds(10000);
-        BrickPi.MA.stop();
+        motorRight = BrickPi.MA;
+        motorRight.setDiameter(5);
+        BrickPi.MC = new Motor();
+        motorLeft = BrickPi.MC;
+        motorLeft.setDiameter(5);
+    }
+    
+    protected void stop() {
+        stop = true;
+        BrickPi.stop();
     }
 }
-

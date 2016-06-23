@@ -234,6 +234,24 @@ public class Pushbullet {
     }
     
     /**
+     * Upload a file on the Pushbullet servers.
+     * @param url authorized url to post the file.
+     * @param filePath the local path of the file to post.
+     * @return the response from the HTTP request.
+     */
+    public int postFile(String url, String filePath) {
+        String cmd = "curl -i -X POST " + url + " -F file=@" + filePath;
+        Process process;
+        try {
+            process = Runtime.getRuntime().exec(cmd);
+            process.waitFor();
+            return process.exitValue();
+        } catch (IOException | InterruptedException e) {
+            throw new RaspoidException("[Pushbullet] Error when uploading a file.", e);
+        }
+    }
+    
+    /**
      * Sends an Http request (Get or Post), and returns the String representation
      * of the response from the server.
      * @return the String representation of the response from the server. 
@@ -347,7 +365,7 @@ public class Pushbullet {
      * to the account linked to the specified access token.
      * @param title the title of the push sent to the Pusbullet server.
      * @param body the body of the push sent to the Pushbullet server.
-     * @param targetDeviceIden the user's device targeted by the push.
+     * @param targetDeviceIden the user's device targeted by the push. null for broadcast.
      * @return a Push entity representing the newly sent push to the Pushbullet server.
      */
     public Push sendNewPush(String title, String body, String targetDeviceIden) {
@@ -360,6 +378,42 @@ public class Pushbullet {
         if(targetDeviceIden != null)
             urlParameters.add(new BasicNameValuePair("device_iden", targetDeviceIden));
         urlParameters.add(new BasicNameValuePair("source_device_iden", deviceIden));
+        String response = sendPostRequest("https://api.pushbullet.com/v2/pushes", urlParameters);
+        return deserializePushbulletEntity(response, Push.class);
+    }
+    
+    /**
+     * Sends a new file to the Pushbullet servers and sends this file through a push.
+     * The push is sent to a specific device, or in broadcast mode if targetDeviceIden is null.
+     * @param filePath the path of the file to send.
+     * @param fileName the name of the file to send.
+     * @param fileType the type of the file to send.
+     * @param targetDeviceIden the user's device targeted by the push. null for broadcast.
+     * @return a Push entity representing the newly sent push.
+     */
+    public Push sendNewFile(String filePath, String fileName, String fileType, String targetDeviceIden) {
+        // step 1 - request authorization to upload a file
+        List<NameValuePair> url1Parameters = new ArrayList<>();
+        url1Parameters.add(new BasicNameValuePair("file_name", fileName));
+        url1Parameters.add(new BasicNameValuePair("file_type", fileType));
+        String response1 = sendPostRequest("https://api.pushbullet.com/v2/upload-request", url1Parameters);
+        FileUploaded fileUploaded = deserializePushbulletEntity(response1, FileUploaded.class);
+        Tools.log("DEBUG AAAAA: " + fileUploaded.getFileName() + " " + fileUploaded.getUploadUrl());
+        
+        // step 2 - upload the file
+        int result = postFile(fileUploaded.getUploadUrl(), filePath);
+        Tools.log("FILE POSTED? exit value: " + result);
+        
+        // step 3 - new push
+        List<NameValuePair> urlParameters = new ArrayList<>();
+        urlParameters.add(new BasicNameValuePair("type", "file"));
+        urlParameters.add(new BasicNameValuePair("file_name", fileUploaded.getFileName()));
+        urlParameters.add(new BasicNameValuePair("file_url", fileUploaded.getFileUrl()));
+        urlParameters.add(new BasicNameValuePair("file_type", fileUploaded.getFileType()));
+        if(targetDeviceIden != null)
+            urlParameters.add(new BasicNameValuePair("device_iden", targetDeviceIden));
+        urlParameters.add(new BasicNameValuePair("source_device_iden", deviceIden));
+        Tools.log("URL PARAMETERS: " + urlParameters);
         String response = sendPostRequest("https://api.pushbullet.com/v2/pushes", urlParameters);
         return deserializePushbulletEntity(response, Push.class);
     }
@@ -384,7 +438,7 @@ public class Pushbullet {
                     // We then need to check pushes and keep the new ones for our device into account
                     List<Push> newPushes = getListOfPushes(lastPushReceivedTime, -1);
                     for(Push newPush : newPushes) {
-                        String targetDeviceIden = newPush.getTargetDeviceIden(); 
+                        String targetDeviceIden = newPush.getTargetDeviceIden();
                         if(targetDeviceIden != null && targetDeviceIden.equals(deviceIden)) {
                             String newPushBody = newPush.getBody();
                             String response;

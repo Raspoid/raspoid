@@ -159,10 +159,10 @@ public class JoystickRemote {
         int x = result[0];
         int y = result[1];
         if(x == -1 && y == -1) {
-            // button pressed, no message is sent
+            // button pressed, no message sent
             neutralValueSent = false;
             sendNewValue = false;
-        } else if(x == 129 && y == 129) {
+        } else if(x <= 133 && x >= 129 && y <= 133 && y >= 129) {
             // neutral position
             if(!neutralValueSent) {
                 sendNewValue = true;
@@ -189,19 +189,6 @@ public class JoystickRemote {
             request = request + "/" + x + "/" + y;
             byte[] message = request.getBytes("UTF-8");
             outputStream.writeInt(message.length);
-            outputStream.write(message);
-            outputStream.flush();
-        } catch (IOException e) {
-            throw new RaspoidException("Problem when sending new Joystick update: (request) " + request, e);
-        }
-    }
-    
-    // TODO to delete
-    private void updateCameraSupportOrientation(int x, int y) {
-        String request = "update_camera_support_orientation/" + x + "/" + y;
-        try {
-            byte[] message = request.getBytes("UTF-8");
-            outputStream.writeInt(message.length); // with outputStream = new DataOutputStream(socket.getOutputStream());
             outputStream.write(message);
             outputStream.flush();
         } catch (IOException e) {

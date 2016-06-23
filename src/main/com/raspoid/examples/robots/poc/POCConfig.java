@@ -32,10 +32,14 @@ public class POCConfig {
     private boolean pcf8591Nb1Enabled = true;
     private boolean lcdDisplayEnabled = true;
     private boolean cameraSupportEnabled = true;
+    private boolean cameraStreamEnabled = true;
     private boolean irReceiverEnabled = true;
     private boolean thermistorEnabled = true;
     private boolean barometerEnabled = true;
     private boolean passiveBuzzerEnabled = true;
+    private boolean nxtEnabled = true;
+    private boolean photoresistorEnabled = true;
+    private boolean soundSensorEnabled = true;
     
     /**
      * Default constructor to enable each component of the POC Robot.
@@ -121,6 +125,33 @@ public class POCConfig {
     public boolean cameraSupportEnabled() {
         return this.cameraSupportEnabled;
     }
+    
+    /* -----------------------------------------------
+     *                  Camera stream
+     * ---------------------------------------------*/
+    
+    /**
+     * Enable the camera stream.
+     */
+    public void enableCameraStream() {
+        this.cameraStreamEnabled = true;
+    }
+    
+    /**
+     * Disable the camera stream.
+     */
+    public void disableCameraStream() {
+        this.cameraStreamEnabled = false;
+    }
+    
+    /**
+     * Checks if the camera stream is enabled.
+     * @return true if the camera stream is enabled. False otherwise.
+     */
+    public boolean cameraStreamEnabled() {
+        return this.cameraStreamEnabled;
+    }
+
     
     /* -----------------------------------------------
      *                   IR Receiver
@@ -225,4 +256,83 @@ public class POCConfig {
     public boolean passiveBuzzerEnabled() {
         return passiveBuzzerEnabled;
     }
+    
+    /* -----------------------------------------------
+     *                       NXT
+     * ---------------------------------------------*/
+    
+    /**
+     * Enable NXT components.
+     */
+    public void enableNXT() {
+        this.nxtEnabled = true;
+    }
+    
+    /**
+     * Disable the NXT components.
+     */
+    public void disableNXT() {
+        this.nxtEnabled = false;
+    }
+    
+    /**
+     * Checks if the NXT components are enabled.
+     * @return true if the NXT components are enabled. False otherwise.
+     */
+    public boolean NXTEnabled() {
+        return nxtEnabled;
+    }
+    
+    /* -----------------------------------------------
+     *                 Photoresistor
+     * ---------------------------------------------*/
+    
+    /**
+     * Enable the photoresistor.
+     */
+    public void enablePhotoresistor() {
+        this.photoresistorEnabled = true;
+    }
+    
+    /**
+     * Disable the photoresistor.
+     */
+    public void disablePhotoresistor() {
+        this.photoresistorEnabled = false;
+    }
+    
+    /**
+     * Checks if the photoresistor is enabled.
+     * @return true if the photoresistor is enabled. False otherwise.
+     */
+    public boolean photoresistorEnabled() {
+        return photoresistorEnabled;
+    }
+    
+    /* -----------------------------------------------
+     *                 Sound Sensor
+     * ---------------------------------------------*/
+    
+    /**
+     * Enable the sound sensor.
+     */
+    public void enableSoundSensor() {
+        this.soundSensorEnabled = true;
+    }
+    
+    /**
+     * Disable the sound sensor.
+     */
+    public void disableSoundSensor() {
+        this.soundSensorEnabled = false;
+    }
+    
+    /**
+     * Checks if the sound sensor is enabled.
+     * @return true if the sound sensor is enabled. False otherwise.
+     */
+    public boolean soundSensorEnabled() {
+        return soundSensorEnabled;
+    }
+
 }

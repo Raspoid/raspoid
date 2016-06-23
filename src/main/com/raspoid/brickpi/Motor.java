@@ -25,6 +25,7 @@ import java.util.concurrent.CountDownLatch;
 import org.pid4j.pid.DefaultPid;
 import org.pid4j.pid.Pid;
 
+import com.raspoid.Tools;
 import com.raspoid.brickpi.nxt.RangedValueListener;
 import com.raspoid.brickpi.nxt.ValueChangeEvent;
 import com.raspoid.brickpi.nxt.ValueListener;
@@ -85,9 +86,14 @@ public class Motor {
     private int realEncoderValue = 0;
     
     /**
-     * Offset used to calculate the returned encoderValue in the getter.
+     * Sign to apply to the encoder value. Used to detect when the motor rotates counterclockwise and goes below 0.
      */
-    private int encoderValueOffset = 0;
+    private int encoderSign = 1;
+    
+    /**
+     * Latch used to detect when the first sign of the encoder value is setted.
+     */
+    private boolean initSignRetrieved = false;
     
     /**
      * Listeners with range argument needed.
@@ -98,9 +104,9 @@ public class Motor {
      * Latch for waiting for the encoders to be initialized
      */
     private final CountDownLatch encoderInitLatch = new CountDownLatch(1);
-    
+        
     /**
-     * Get the diameter (cms) configured for a wheel attached on the motor
+     * Get the diameter (cm) configured for a wheel attached on the motor.
      * @return the diameter configured in centimeters
      */
     public double getDiameter() {
@@ -108,7 +114,7 @@ public class Motor {
     }
 
     /**
-     * Configure the diameter (cms) for a wheel attached on the motor 
+     * Configure the diameter (cm) for a wheel attached on the motor 
      * @param diameter the diameter size in centimeters
      */
     public void setDiameter(double diameter) {
@@ -179,43 +185,51 @@ public class Motor {
     }
     
     /**
-     * Stops the motor
+     * Stops the motor.
      */
     public void stop() {
         setPower(0);
     }
     
     /**
-     * Resets the value of the encoder offset.
-     * This offset is used to return a calculated encoder value to the end user
-     * when using the getEncoderValue method.
-     */
-    public void resetEncoderValue() {
-        getEncoderValue(); // in case it was not initialized
-        encoderValueOffset = realEncoderValue;
-    }    
-
-    /**
      * Sets the value of the encoder of the motor.
      * This is used to update the realEncoderValue of the motor
      * when an update is received from the brick pi.
      * @param realEncoderValue the new value for the encoder.
      */
-    protected void setEncoderValue(int realEncoderValue) {
+    public void setEncoderValue(int realEncoderValue) {
         //avoid polling get encoder otherwise it would block because of the latch
-        int oldEncoderValue = encodersInitialized() ? getEncoderValue() : 0;
+        int oldEncoderValue = encodersInitialized() ? Math.abs(getEncoderValue()) : 0;
         this.realEncoderValue = realEncoderValue;
         
         if(encodersInitialized()) {
+            // Update encoder sign
+            // (/!\ do not change the sign when power = 0, or when no change in the encoder value !)
+            if((oldEncoderValue - realEncoderValue) < 0) {
+                // ASC encoder value
+                if(power > 0)
+                    encoderSign = 1;
+                else if(power < 0)
+                    encoderSign = -1;
+            } else if((oldEncoderValue - realEncoderValue) > 0) {
+                // DESC encoder value
+                if(power > 0)
+                    encoderSign = -1;
+                else if(power < 0)
+                    encoderSign = 1;
+            }
+            
             for(RangedValueListener listener : listenersWithRange) {
-                listener.notifyUpdate(new ValueChangeEvent(oldEncoderValue, getEncoderValue()));
+                listener.notifyUpdate(new ValueChangeEvent(oldEncoderValue, Math.abs(getEncoderValue())));
             }
         } else {
             // We need to initialize the initial encoderValue
             // so the first event is launched when nbRotations are really executed
             // and not for the first encoderValue update
             // Needed if listener added before first encoderValue initialization
+                        
             encoderInitLatch.countDown();
+            
             for(RangedValueListener listener : listenersWithRange) {
                 listener.setInitialValue(realEncoderValue);
             }
@@ -244,7 +258,7 @@ public class Motor {
             Thread.currentThread().interrupt();
             throw new RaspoidInterruptedException("Motor initialization was interrupted unexpectedly", e);
         }
-        return realEncoderValue - encoderValueOffset;
+        return realEncoderValue * encoderSign;
     }
  
     /**
@@ -258,7 +272,7 @@ public class Motor {
         // We need to initialize the initial encoderValue
         // so the first event is launched when value range is really exceeded
         // and not for the first encoderValue update
-        listenerWithRange.setInitialValue(realEncoderValue - encoderValueOffset);
+        listenerWithRange.setInitialValue(realEncoderValue);
         
         this.addListenerWithRange(listenerWithRange);
     }
@@ -272,21 +286,31 @@ public class Motor {
     }
     
     /**
-     * Rotate the motor a specified number of time using a PID eval loop. 
-     * @param nbRotations number of rotations to perform, can be a float number
-     * @param initPower the initial power applied which is also the upper power bound
+     * Rotate the motor for a specified number of rotations using a PID eval loop.
+     * <p>This method is blocking.</p>
+     * @param nbRotations the number of rotations to perform.
+     * @param initPower the initial power applied which is also the upper power bound used by the PID.
      */
     public void rotate(double nbRotations, int initPower) {
-        if (nbRotations <= 0) {
-            throw new RaspoidException("The number of rotations to perform should be strictly positive");
+        if(nbRotations <= 0)
+            throw new RaspoidException("The number of rotations to perform must be strictly positive");
+        
+        if(!initSignRetrieved) {
+            // Note: we can't determine the sign of the first encoder value.
+            // So we need to make the motor move to know the first encoder value.
+            setPower(50);
+            Tools.sleepMilliseconds(100);
+            setPower(0);
+            initSignRetrieved = true;
         }
+        
         // Handle the blocking call
         CountDownLatch endLatch = new CountDownLatch(1);
         Pid pid = new DefaultPid();
         pid.setKpid(kp, ki, kd);
         
         // Configure the pid output range to be the power applied to the motor
-        if (initPower > 0) {
+        if(initPower > 0) {
             pid.setOutputLimits(0., (double)initPower);
         } else {
             pid.setOutputLimits((double)initPower, 0.);
@@ -294,21 +318,22 @@ public class Motor {
         
         //Set the wanted encoder value to be reach
         double encoderGoal = nbRotations * Motor.ENC_LAP_VALUE;
-        encoderGoal = initPower > 0 ? getEncoderValue() + encoderGoal : getEncoderValue() - encoderGoal; 
+        encoderGoal = initPower > 0 ? getEncoderValue() + encoderGoal : getEncoderValue() - encoderGoal;
         pid.setSetPoint(encoderGoal);
         
         //Listener checking if goal is reached
         ValueListener encoderListener = evt -> {
             double output = pid.compute((double)getEncoderValue());
             setPower((int)output);
-            if ((initPower > 0 && pid.getSetPoint() <= getEncoderValue())
+            if ((initPower >= 0 && pid.getSetPoint() <= getEncoderValue())
                     || (initPower < 0 && pid.getSetPoint() >= getEncoderValue())) {
                 endLatch.countDown(); // release the method when done
+                setPower(0);
             }
         };
         
         //Initiate the move
-        onChange(1, encoderListener);
+        onChange(10, encoderListener);
         double output = pid.compute((double)getEncoderValue());
         setPower((int)output);
         
@@ -318,19 +343,93 @@ public class Motor {
             removeListener(encoderListener);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RaspoidInterruptedException("Motor rotation was interrupted unexpectedly", e);
+            throw new RaspoidInterruptedException("Motor rotation interrupted unexpectedly", e);
         }
     }
     
     /**
-     * Moves the motor on a specified distance (cms) using a PID eval loop. The diameter of
-     * the wheel attached to the motor should be properly set before calling this method.
-     * @param distance the distance to travel in centimeters
-     * @param initSpeed the initial power applied which is also the upper power bound
+     * Rotate the motor for a specified number of rotations using a PID eval loop.
+     * <p>This method is non-blocking.</p>
+     * @see #rotate(double, int)
+     * @param nbRotations the number of rotations to perform.
+     * @param initPower the initial power applied which is also the upper power bound used by the PID.
+     * @return the Thread used to execute the action.
      */
-    public void move(double distance, int initSpeed) {
-        double perimeter = 2 * Math.PI * (diameter / 2);
-        rotate(distance / perimeter, initSpeed);    
+    public Thread rotateNonBlocking(double nbRotations, int initPower) {
+        Thread thread = new Thread() {
+            
+            @Override
+            public void run() {
+                rotate(nbRotations, initPower);
+                try {
+                    this.interrupt();
+                    this.join();
+                    return;
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+        thread.start();
+        return thread;
+    }
+    
+    /**
+     * Rotates the motor to travel a specific distance (cm) using a PID eval loop.<br>
+     * The diameter of the wheel attached to the motor should be properly set before calling this method.
+     * <p>This method is blocking.</p>
+     * @param distance the distance to travel, in centimeters.
+     * @param initPower the initial power applied, which is also the upper power bound used by the PID.
+     */
+    public void move(double distance, int initPower) {
+        double perimeter = Math.PI * diameter;
+        rotate(distance / perimeter, initPower);
+    }
+    
+    /**
+     * Rotates the motor to travel a specific distance (cm) using a PID eval loop.<br>
+     * The diameter of the wheel attached to the motor should be properly set before calling this method.
+     * <p>This method is non-blocking.</p>
+     * @param distance the distance to travel, in centimeters.
+     * @param initPower the initial power applied, which is also the upper power bound used by the PID.
+     * @return the Thread used to execute the action.
+     */
+    public Thread moveNonBlocking(double distance, int initPower) {
+        Thread thread = new Thread() {
+            @Override
+            public void run() {
+                move(distance, initPower);
+                try {
+                    this.interrupt();
+                    this.join();
+                    return;
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+        thread.start();
+        return thread;
+    }
+    
+    /**
+     * This utility method is used as a barrier: each Thread given in parameter must be finished, before the method stops.<br>
+     * This allows to have a blocking method combining non-blocking actions.
+     * <p>As an example, it is possible to rotate 2 motors at the same time,
+     * and wait that the rotations are finished on both motors to consider the complete action as finished.</p>
+     * <p>This method is blocking.</p>
+     * @param threads the Threads to consider for the barrier.
+     */
+    public static void waitAllFinished(Thread[] threads) {
+        boolean stillRunning = true;
+        while(stillRunning) {
+            Tools.sleepMilliseconds(10);
+            stillRunning = false;
+            for (Thread thread : threads) {
+                if(thread.isAlive())
+                    stillRunning = true;
+            }
+        }
     }
     
     /**
@@ -359,4 +458,8 @@ public class Motor {
         }
     }
     
+    @Override
+    public String toString() {
+        return "[Motor] wheel diameter: " + diameter + "cm.";
+    }
 }

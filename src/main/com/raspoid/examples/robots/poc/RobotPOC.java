@@ -26,39 +26,55 @@ import com.raspoid.PWMPin;
 import com.raspoid.Tools;
 import com.raspoid.additionalcomponents.BarometerBMP180;
 import com.raspoid.additionalcomponents.LCM1602;
-import com.raspoid.additionalcomponents.LED;
+import com.raspoid.additionalcomponents.LEDPWM;
 import com.raspoid.additionalcomponents.PCA9685;
 import com.raspoid.additionalcomponents.PCA9685.PCA9685Channel;
 import com.raspoid.additionalcomponents.adc.PCF8591;
 import com.raspoid.additionalcomponents.adc.PCF8591InputChannel;
+import com.raspoid.additionalcomponents.camera.CameraPi;
+import com.raspoid.additionalcomponents.camera.Picture;
 import com.raspoid.additionalcomponents.ir.IRProtocolSunfounderMediaRemote;
 import com.raspoid.additionalcomponents.ir.IRReceiverOS1838B;
 import com.raspoid.additionalcomponents.ir.IRSignal;
-import com.raspoid.additionalcomponents.notes.BaseNote;
 import com.raspoid.additionalcomponents.servomotor.TowerProMG90S;
+import com.raspoid.brickpi.BrickPi;
+import com.raspoid.brickpi.Motor;
+import com.raspoid.brickpi.nxt.ValueChangeEvent;
+import com.raspoid.brickpi.nxt.sensor.TouchSensor;
 import com.raspoid.additionalcomponents.PassiveBuzzer;
+import com.raspoid.additionalcomponents.Photoresistor;
+import com.raspoid.additionalcomponents.SoundSensor;
 import com.raspoid.additionalcomponents.Thermistor;
 import com.raspoid.additionalcomponents.ThermistorNTCLE203E3103SB0;
 import com.raspoid.network.MessageLikeSocketServer;
 import com.raspoid.network.NetworkUtilities;
 import com.raspoid.network.Router;
 import com.raspoid.network.SocketServer;
+import com.raspoid.network.pushbullet.Pushbullet;
 
 /**
- * <b>This aim of this robot is to illustrate a maximum of the features offered by the Raspoid framework.</b>
+ * The aim of this robot is to illustrate a maximum of the features offered by the Raspoid framework.
  * 
- * <p>This robot is composed of:
- *  <ul>
- *      <li>LEGO Mindstorms NXT,</li>
- *      <li>XX additional sensors/actuators,</li>
- *      <li>a socket server to send HTTP request from your browser,</li>
- *      <li>a pushbullet integration to send requests from your smartphone,</li>
- *      <li>a message-like socket server to use the joystick remote part of the robot</li>
- *      <li>...</li>
- *  </ul>
- * </p>
+ * <p>It is composed of two main parts: the robot (part 1) and a "joystick remote" (part 2).
+ * The part 1 combines a Raspberry Pi 2, a BrickPi, some LEGO Mindstorms NXT sensors and motors, and a set of additional components.
+ * The part 2 combines a Raspberry Pi 2 and a joystick.</p>
  * 
- * <p>Don't hesitate to check our online post regarding this robot.
+ * <p>The operating principle is the following: the joystick part (part 2) of the project is used to control
+ * the robot (part 1) through the network, as a remote control.
+ * To do so, part 2 is used to create a WiFi hotspot. Part 1 will automatically connect to this hotspot,
+ * so that both sides are part of the same network, and can communicate together. There are two different modes
+ * for the joystick. The first mode controls the movements of the robot (by sending commands to control the two motors)
+ * while the second one controls the orientation of the camera support (by sending commands to control the two servomotors
+ * composing the camera support - the robot contains a camera support which is able to rotate along x and y axis (horizontally and vertically),
+ * via two servomotors). The communications between the joystick remote and the robot are performed by using a
+ * MessageLikeSocketServer on part 1 to deal with commands received from part 2.
+ * They respect the related specific protocol as presented in the network part of this report.
+ * From the joystick, it is possible to switch from one mode to another by pressing the green button.
+ * When the LED is ON: the movements of the robot are controlled; when the LED is OFF: the camera support is controlled.
+ * The joystick is an analog component: we used an ADC to convert analog signals coming from the joystick into
+ * digital commands.</p>
+ * 
+ * <p>Do not hesitate to check our online post regarding this robot.
  * We made some videos and pictures to illustrate the result: <a href="http://raspoid.com">Raspoid.com</a></p>
  * 
  * @author Julien Louette &amp; Ga&euml;l Wittorski
@@ -136,6 +152,26 @@ public class RobotPOC {
      */
     private PassiveBuzzer buzzer = null;
     
+    /**
+     * [Photoresistor] photoresistor.
+     */
+    private Photoresistor photoresistor = null;
+    
+    /**
+     * [SoundSensor] sound sensor.
+     */
+    private SoundSensor soundSensor = null;
+    
+    /**
+     * [NXT Motor] left.
+     */
+    private Motor motorLeft;
+    
+    /**
+     * [NXT Motor] right.
+     */
+    private Motor motorRight;
+    
     /* ===============================================
      *                  VARIABLES
      * =============================================*/
@@ -175,6 +211,8 @@ public class RobotPOC {
      */
     private boolean stopped = false;
     
+    private POCConfig config;
+    
     /* ===============================================
      *                  CONSTRUCTOR
      * =============================================*/
@@ -184,6 +222,9 @@ public class RobotPOC {
      * @param config the config to apply for this instance of the robot.
      */
     public RobotPOC(POCConfig config) {
+        
+        this.config = config;
+        PCA9685 pca9685 = new PCA9685();
         
         if(config.pcf8591Nb1Enabled()) {
             pcf8591Nb1 = new PCF8591();
@@ -210,18 +251,21 @@ public class RobotPOC {
         }
         
         if(config.cameraSupportEnabled()) {
-            PCA9685 pca9685 = new PCA9685();
-//            servo1 = new TowerProMG90S(PWMPin.PWM0); // TODO
-            servo1 = new TowerProMG90S(pca9685, PCA9685Channel.CHANNEL_01);
-//            servo2 = new TowerProMG90S(PWMPin.PWM1);
-            servo2 = new TowerProMG90S(pca9685, PCA9685Channel.CHANNEL_02);
+            servo1 = new TowerProMG90S(PWMPin.PWM0);
+            servo2 = new TowerProMG90S(PWMPin.PWM1);
             rotateCameraSupportHorizontally(90);
             rotateCameraSupportVertically(58);
             Tools.debug("Camera support enabled", Tools.Color.ANSI_RED);
         }
         
+        if(config.cameraStreamEnabled()) {
+            new Thread(() -> 
+                CameraPi.startGStreamerServer(NetworkUtilities.getIpAddresses().get(0), NetworkUtilities.getAvailablePort(), 640, 360, false, false, 2500000, true, false)
+            ).start();
+        }
+        
         if(config.irReceiverEnabled()) {
-            irReceiver = new IRReceiverOS1838B(GPIOPin.GPIO_00);
+            irReceiver = new IRReceiverOS1838B(GPIOPin.GPIO_04);
             
             new Thread(() -> {
                 while(!stopped) {
@@ -246,8 +290,6 @@ public class RobotPOC {
                         } else {
                             Tools.debug("New signal received but not decoded: " + newSignal, Tools.Color.ANSI_BLUE);
                         }
-                    } else {
-                        Tools.sleepMilliseconds(500);
                     }
                 }
             }).start();
@@ -263,9 +305,8 @@ public class RobotPOC {
                     while(!stopped) {
                         if(running) {
                             thermistorTemperature = thermistor.getTemperature();
-                            Tools.debug("Temperature: " + thermistorTemperature);
                         }
-                        Tools.sleepMilliseconds(200);
+                        Tools.sleepMilliseconds(500);
                     }
                 }).start();
         }
@@ -313,43 +354,114 @@ public class RobotPOC {
                 }).start();
         }
         
-        if(config.passiveBuzzerEnabled()) {
-            buzzer = new PassiveBuzzer(PWMPin.PWM1);
-            int wholeNote = 1000000;
-            int halfNote = wholeNote / 2;
-            int quarterNote = wholeNote / 4;
-            int eightNote = wholeNote / 8;
+        if(config.passiveBuzzerEnabled())
+            buzzer = new PassiveBuzzer(pca9685, PCA9685Channel.CHANNEL_00);
+        
+        if(config.photoresistorEnabled()) {
+            photoresistor = new Photoresistor(pcf8591Nb1, PCF8591InputChannel.CHANNEL_1);
+            LEDPWM pwmLED = new LEDPWM(pca9685, PCA9685Channel.CHANNEL_04);
             
-            buzzer.playNote(BaseNote.DO_0, 4, wholeNote);
-            buzzer.playNote(BaseNote.RE_0, 4, halfNote);
-            buzzer.playNote(BaseNote.MI_0, 4, quarterNote);
-            buzzer.playNote(BaseNote.FA_0, 4, eightNote);
+            new Thread(() -> {
+                int intensity;
+                while(true) {
+                    intensity = photoresistor.getIntensity();
+                    if(intensity < 30)
+                        intensity = 100;
+                    else
+                        intensity = 10;
+                    pwmLED.setIntensity(intensity);
+                    Tools.sleepMilliseconds(100);
+                }
+            }).start();
+        }
+        
+        if(config.soundSensorEnabled()) {
+            soundSensor = new SoundSensor(pcf8591Nb1, PCF8591InputChannel.CHANNEL_2);
+            new Thread(() -> {
+                while(true) {
+                    if(soundSensor.getIntensity() > 70)
+                        Tools.log("Clap detected");
+                    Tools.sleepMilliseconds(100);
+                }
+            }).start();
+        }
+        
+        if(config.NXTEnabled()) {
+            instantiateNXT();
         }
         
         // Joystick WebSocket server
         Router joystickRouter = new Router();
         joystickRouter.addRouteWithParams("joystick_camera", 2, inputArgs -> {
-            this.newJoystickPosition(Integer.valueOf(inputArgs[0]), Integer.valueOf(inputArgs[1]));
-            return "New joystick position received.";
+            if(config.cameraSupportEnabled()) {
+                this.newCameraSupportPosition(Integer.valueOf(inputArgs[0]), Integer.valueOf(inputArgs[1]));
+                return "New joystick position received.";
+            } else {
+                return "Camera support disabled.";
+            }
         });
         joystickRouter.addRouteWithParams("joystick_robot_motors", 2, inputArgs -> {
-            // TODO move robot accordingly
-//            this.newJoystickPosition(Integer.valueOf(inputArgs[0]), Integer.valueOf(inputArgs[1]));
+            if(config.NXTEnabled()) {
+                int x = joystickValueToNXTMotorPower(Integer.valueOf(inputArgs[0]));
+                int y = joystickValueToNXTMotorPower(Integer.valueOf(inputArgs[1]));
+                int powerLeft = 0;
+                int powerRight = 0;
+                if(x >= 0 && y >= 0) {
+                    powerLeft = -Math.abs(x);
+                    if(powerLeft > -75)
+                        powerLeft = -75;
+                    powerRight = -Math.abs(Math.abs(x) - Math.abs(y));
+                    if(powerRight > -75)
+                        powerRight = -75;
+                } else if(x >= 0 && y <= 0) {
+                    powerLeft = -Math.abs(Math.abs(x) - Math.abs(y));
+                    if(powerLeft > -75)
+                        powerLeft = -75;
+                    powerRight = -Math.abs(x);
+                    if(powerRight > -75)
+                        powerRight = -75;
+                } else if(x <= 0 && y <= 0) {
+                    powerLeft = Math.abs(Math.abs(x) - Math.abs(y));
+                    if(powerLeft < 75)
+                        powerLeft = 75;
+                    powerRight = Math.abs(x);
+                    if(powerRight < 75)
+                        powerRight = 75;
+                } else if(x <= 0 && y >= 0) {
+                    powerLeft = Math.abs(x);
+                    if(powerLeft < 75)
+                        powerLeft = 75;
+                    powerRight = Math.abs(Math.abs(x) - Math.abs(y));
+                    if(powerRight < 75)
+                        powerRight = 75;
+                }
+                if(x == 0 && y == 0) {
+                    powerLeft = 0;
+                    powerRight = 0;
+                }
+                Tools.log("x: " + x + ", y: " + y);
+                Tools.log("power left: " + powerLeft + " powerRight: " + powerRight);
+                motorLeft.setPower(powerLeft);
+                motorRight.setPower(powerRight);
+            }
             return "";
         });
         // joystick_router will work better on a message like server, to be sure no requests are not correctly received.
-        new MessageLikeSocketServer(5, 81, joystickRouter).start();
-        new SocketServer(5, 80, joystickRouter).start();
+        new MessageLikeSocketServer(5, NetworkUtilities.getAvailablePort(), joystickRouter).start();
+            
+        // Main router
+        Router mainRouter = new Router();
         
-        // Green Led light up
-        LED greenLed = new LED(GPIOPin.GPIO_26);
-        new Thread(() -> {
-            while(!stopped) {
-                if(running)
-                    greenLed.toggle();
-                Tools.sleepMilliseconds(500);
-            }
-        }).start();
+        Pushbullet pushbullet = new Pushbullet("<your_access_token>", "RaspoidPOC", mainRouter);
+        new SocketServer(5, NetworkUtilities.getAvailablePort(), mainRouter).start();
+        
+        mainRouter.addRoute("temperature", () -> String.format(Locale.US,"%.2f", thermistor.getTemperature()) + "°C");
+        mainRouter.addRoute("thanks", () -> "You're welcome");
+        mainRouter.addRoute("takePicture", () -> {
+            Picture picture = CameraPi.takePicture();
+            Tools.log("PICTURE: " + picture);
+            pushbullet.sendNewFile(picture.getFilePath(), picture.getConfig().getOutputFilenameWithExtension(), "image/jpeg", null);
+            return "New picture";});
         
         // To execute on exit
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -429,11 +541,12 @@ public class RobotPOC {
     }
     
     /**
+     * Update the current position of the camera support.<br>
      * Called when the position of the remote joystick has changed.
      * @param x the new x position received.
      * @param y the new y position received.
      */
-    public void newJoystickPosition(int x, int y) {
+    public void newCameraSupportPosition(int x, int y) {
         rotateCameraSupportHorizontally(joystickValueToHorizontalAngle(y));
         rotateCameraSupportVertically(joystickValueToVerticalAngle(x));
         Tools.log("New joystick position: " + x + " " + y + " | vertical angle: " + joystickValueToVerticalAngle(x) + " | horizontal angle: " + joystickValueToHorizontalAngle(y));
@@ -467,6 +580,23 @@ public class RobotPOC {
             return (value - CAMERA_SUPPORT_JOYSTICK_HORIZONTAL_MIN_VALUE_RANGE) * CAMERA_SUPPORT_HORIZONTAL_JOYSTICK_UNIT_TO_DEGREE;
     }
     
+    /**
+     * Returns the power to apply to the NXT motors, accordingly to the values received from the joystick.<br>
+     * Motor (power): -200..-72, 0, 75..200<br>
+     * Joystick: 0..128, 129, 130..255
+     * @param value the value received from the joystick.
+     * @return the power to apply to the motor.
+     */
+    private int joystickValueToNXTMotorPower(int value) {
+        if(value <= 133 && value >= 129)
+            // neutral value
+            return 0;
+        else if(value < 133)
+            return -72 - (133 - value);
+        else
+            return 75 + (value - 133);
+    }
+    
     
     /**
      * This method updates the required content of the display, when needed.
@@ -480,9 +610,9 @@ public class RobotPOC {
         case IP_ADDRESS:
             ipAddresses = NetworkUtilities.getIpAddresses();
             if(ipAddresses != null && !ipAddresses.isEmpty())
-                lcdDisplay.writeTextRightAlign(1, ipAddresses.get(0)); // TODO create a new method "update line content" qui assure qu'on recouvre bien les char qui ne sont plus utilisés sur le display, par de " ". Simplement en gardant une trace du current printed line content.
+                updateLcdLine(1, ipAddresses.get(0), false);
             else
-                lcdDisplay.writeTextRightAlign(1, "none available");
+                updateLcdLine(1, "unavailable", false);
             break;
         case TEMPERATURE:
             if(thermistor != null)
@@ -573,6 +703,29 @@ public class RobotPOC {
         }
     }
     
+    private void instantiateNXT() {
+        // MOTORS
+        BrickPi.MA = new Motor();
+        motorRight = BrickPi.MA;
+        motorRight.setDiameter(5);
+        BrickPi.MC = new Motor();
+        motorLeft = BrickPi.MC;
+        motorLeft.setDiameter(5);
+        
+        // SENSORS
+        // Touch Sensor
+        BrickPi.S3 = new TouchSensor();
+        BrickPi.S3.onChange((ValueChangeEvent evt) -> { 
+            if(evt.getNewValue() == 1) {
+                if(config.passiveBuzzerEnabled()) {
+                    StarWars.playShort(buzzer);
+                }
+            }
+        });
+        
+        BrickPi.start();
+    }
+    
     /* ===============================================
      *                      MAIN
      * =============================================*/
@@ -586,13 +739,17 @@ public class RobotPOC {
         Tools.enableLogs();
         
         POCConfig config = new POCConfig();
-        config.enablePCF8591Nb1();
-        config.enableLcdDisplay();
-        config.enableCameraSupport();
-        config.disableIRReceiver(); // ! Attention ! requires polling
-        config.enableThermistor();
-        config.enableBarometer();
+        config.disablePCF8591Nb1();
+        config.disableLcdDisplay();
+        config.disableCameraSupport();
+        config.enableCameraStream();
+        config.disableIRReceiver();
+        config.disableThermistor();
+        config.disableBarometer();
         config.disablePassiveBuzzer();
+        config.enableNXT();
+        config.disablePhotoresistor();
+        config.disableSoundSensor();
         
         RobotPOC robot = new RobotPOC(config);
         robot.start();
